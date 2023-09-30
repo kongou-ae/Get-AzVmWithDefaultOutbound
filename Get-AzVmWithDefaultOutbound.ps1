@@ -13,7 +13,12 @@ $vmList = Get-AzVM
 $nicList = Get-AzNetworkInterface
 $vnetList = Get-AzVirtualNetwork
 $lbList = Get-AzLoadBalancer
-$elbList = $lbList | Where-Object { $_.FrontendIpConfigurations.PublicIpAddress.Id -ne $null }
+#$elbList = $lbList | Where-Object { $_.FrontendIpConfigurations.PublicIpAddress.Id -ne $null }
+$elbList = $lbList | Where-Object { 
+    $_.FrontendIpConfigurations.PublicIpAddress.Id -ne $null -and `
+    $_.LoadBalancingRules[0].DisableOutboundSNAT -eq $true
+}
+
 $routeTableList = Get-AzRouteTable
 
 $vmWithDefaultSnat = New-Object System.Collections.ArrayList
