@@ -767,3 +767,533 @@ resource natGw 'Microsoft.Network/natGateways@2023-05-01' = {
     ]
   }
 }
+
+/*
+- defaultOutVMSS01 shoud be detected because this VM uses default outbound.
+- noIntUdrVMSS01 should be detected because this VM runs on the subnet which doesn't have 0.0.0.0/0 route.
+- defaultSnatElbVMSS01 should be detected because this VM is the backend of the ELB which doesn't use outbound rule.
+
+- intUdrVMSS01 should not be detected because this VM runs on the subnet which udr(0.0.0.0/0 -> VirtualAppliance) related with.
+- outboundElbVMSS01 should not be detected because this VM is the backend of the ELB which uses outbound rule.
+- natGwVMSS01 shoud no be detected because this VM runs on the subnet which NAT Gw relates with.
+*/
+
+resource defaultOutVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'defaultOutVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'defaultOutVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/noudr'
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+resource noIntUdrVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'noIntUdrVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'noIntUdrVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/noInternetUdr'
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+resource intUdrVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'intUdrVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'intUdrVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/internetUdr'
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+
+
+resource defaultSnatVmssElbPip 'Microsoft.Network/publicIPAddresses@2021-08-01' = {
+  name: 'defaultSnatVmssElbPip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAddressVersion: 'IPv4'
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource defaultSnatVmssElb 'Microsoft.Network/loadBalancers@2023-05-01' = {
+  name: 'defaultSnatVmssElb'
+  location: location
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    frontendIPConfigurations: [
+      {
+        name: 'frontendIpConfig'
+        properties: {
+          publicIPAddress: {
+            id: defaultSnatVmssElbPip.id
+          }
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: 'outboundRuleElbBackendPool'
+      }
+    ]
+    loadBalancingRules: [
+      {
+        name: 'LoadbalanceRule'
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'defaultSnatVmssElb', 'frontendIpConfig')
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'defaultSnatVmssElb', 'outboundRuleElbBackendPool')
+          }
+          frontendPort: 80
+          backendPort: 80
+          enableFloatingIP: false
+          idleTimeoutInMinutes: 15
+          protocol: 'Tcp'
+          enableTcpReset: true
+          loadDistribution: 'Default'
+          disableOutboundSnat: false
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', 'defaultSnatVmssElb', 'probe')
+          }
+        }
+      }
+    ]
+    probes: [
+      {
+        name: 'probe'
+        properties: {
+          protocol: 'Tcp'
+          port: 80
+          intervalInSeconds: 5
+          numberOfProbes: 2
+        }
+      }
+    ]
+    outboundRules: []
+  }
+}
+
+
+
+resource defaultSnatElbVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'defaultSnatElbVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'defaultSnatElbVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/noudr'
+                    }
+                    loadBalancerBackendAddressPools: [
+                       {
+                         id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'defaultSnatVmssElb', 'outboundRuleElbBackendPool')
+                       }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+
+
+resource outboundRuleElbVmss01Pip 'Microsoft.Network/publicIPAddresses@2021-08-01' = {
+  name: 'outboundRuleElbVmss01Pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAddressVersion: 'IPv4'
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource outboundRuleElbVmss01 'Microsoft.Network/loadBalancers@2023-05-01' = {
+  name: 'outboundRuleElbVmss01'
+  location: location
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    frontendIPConfigurations: [
+      {
+        name: 'frontendIpConfig'
+        properties: {
+          publicIPAddress: {
+            id: outboundRuleElbVmss01Pip.id
+          }
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: 'outboundRuleElbBackendPool'
+      }
+    ]
+    loadBalancingRules: [
+      {
+        name: 'LoadbalanceRule'
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'outboundRuleElbVmss01', 'frontendIpConfig')
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'outboundRuleElbVmss01', 'outboundRuleElbBackendPool')
+          }
+          frontendPort: 80
+          backendPort: 80
+          enableFloatingIP: false
+          idleTimeoutInMinutes: 15
+          protocol: 'Tcp'
+          enableTcpReset: true
+          loadDistribution: 'Default'
+          disableOutboundSnat: true
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', 'outboundRuleElbVmss01', 'probe')
+          }
+        }
+      }
+    ]
+    probes: [
+      {
+        name: 'probe'
+        properties: {
+          protocol: 'Tcp'
+          port: 80
+          intervalInSeconds: 5
+          numberOfProbes: 2
+        }
+      }
+    ]
+    outboundRules: [
+      {
+        name: 'OutboundRule'
+        properties: {
+          allocatedOutboundPorts: 10000
+          protocol: 'All'
+          enableTcpReset: false
+          idleTimeoutInMinutes: 15
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'outboundRuleElbVmss01', 'outboundRuleElbBackendPool')
+          }
+          frontendIPConfigurations: [
+            {
+              id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'outboundRuleElbVmss01', 'frontendIpConfig')
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+
+
+resource outboundElbVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'outboundElbVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'outboundElbVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/noudr'
+                    }
+                    loadBalancerBackendAddressPools: [
+                       {
+                         id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'outboundRuleElbVmss01', 'outboundRuleElbBackendPool')
+                       }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+
+resource natGwVMSS01 'Microsoft.Compute/virtualMachineScaleSets@2023-07-01' = {
+  name: 'natGwVMSS01'
+  location: location
+  sku: {
+    capacity: 2
+    name: 'Standard_B1ms'
+  }
+  properties: {
+    upgradePolicy: {
+      mode: 'Automatic'
+    }
+    virtualMachineProfile: {
+      storageProfile: {
+        osDisk: {
+          createOption: 'FromImage'
+          osType: 'Linux'
+          managedDisk: {
+            storageAccountType: 'StandardSSD_LRS'
+          }
+        }
+        imageReference: {
+          publisher: 'Canonical'
+          offer: '0001-com-ubuntu-server-jammy'
+          sku: '22_04-lts-gen2'
+          version: 'latest'
+        }
+      }
+      osProfile: {
+        adminUsername: adminUser
+        adminPassword: adminPassword
+        computerNamePrefix: 'natGwVMSS01'
+      }
+      networkProfile: {
+        networkInterfaceConfigurations: [
+          {
+            name: 'nicconfig'
+            properties: {
+              primary: true
+              ipConfigurations: [
+                {
+                  name: 'ipconfig'
+                  properties: {
+                    subnet: {
+                      id: '${vnet.id}/subnets/natGw'
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

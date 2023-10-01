@@ -10,18 +10,20 @@ D. 外部ロードバランサーのバックエンドプールに Azure VM が�
 #>
 
 $vmList = Get-AzVM
+$vmssList = Get-AzVMss
 $nicList = Get-AzNetworkInterface
 $vnetList = Get-AzVirtualNetwork
 $lbList = Get-AzLoadBalancer
 #$elbList = $lbList | Where-Object { $_.FrontendIpConfigurations.PublicIpAddress.Id -ne $null }
 $elbList = $lbList | Where-Object { 
     $_.FrontendIpConfigurations.PublicIpAddress.Id -ne $null -and `
-    $_.LoadBalancingRules[0].DisableOutboundSNAT -eq $true
+        $_.LoadBalancingRules[0].DisableOutboundSNAT -eq $true
 }
 
 $routeTableList = Get-AzRouteTable
 
 $vmWithDefaultSnat = New-Object System.Collections.ArrayList
+$vmssWithDefaultSnat = New-Object System.Collections.ArrayList
 
 # NIC に PIP が紐づいているか確認
 function Confirm-HasPip {
@@ -31,13 +33,11 @@ function Confirm-HasPip {
     )
 
     foreach ($ipconfig in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations) {
-        if ($null -eq $ipconfig.PublicIpAddress.Id) {
-            return $false
-        }
-        else {
+        if ($null -ne $ipconfig.PublicIpAddress.Id) {
             return $true
         }
     }
+    return $false
 }
 
 # NIC の Subnet に NATGW が紐づいているか確認
@@ -45,18 +45,30 @@ function Confirm-UseNatGw {
     param (
         $nicId,
         $nicList,
-        $vnetList,
-        $natGwList
+        $vnetList
     )
 
     foreach ($ipconfig in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations) {
-        if ($null -eq ($vnetList.Subnets | Where-Object { $_.id -eq $ipconfig.Subnet.Id }).NatGateway.Id) {
-            return $false
-        }
-        else {
+        if ($null -ne ($vnetList.Subnets | Where-Object { $_.id -eq $ipconfig.Subnet.Id }).NatGateway.Id) {
             return $true
         }
     }
+
+    return $false
+}
+
+function Confirm-UseNatGwForVmss {
+    param (
+        $nicConfig,
+        $vnetList
+    )
+
+    foreach ($ipconfig in $nicConfig.IpConfigurations) {
+        if ($null -ne ($vnetList.Subnets | Where-Object { $_.id -eq $ipconfig.Subnet.Id }).NatGateway.Id) {
+            return $true
+        }
+    }
+    return $false
 }
 
 # NIC に ELB のバックエンドプールが紐づいているか確認
@@ -68,22 +80,51 @@ function Confirm-ElbBackend {
     )
     
     # 1st check ILB と ELB のどちらでもない
-    if ( $null -eq ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations.LoadBalancerBackendAddressPools) {
-        return $false
-    }
-
-    # ELB か ILB か
-    foreach ($LoadBalancerBackendAddressPool in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations.LoadBalancerBackendAddressPools) {
-        $tmp = [regex]::Matches($LoadBalancerBackendAddressPool.id, "(.*)\/backendAddressPools\/")
-        $lbId = $tmp.Groups[1].Value
-
-        if ($null -eq ($elbList | Where-Object { $_.Id -eq $lbId })) {
+    foreach ($ipconfig in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations) {
+        if ( $null -eq $ipconfig.LoadBalancerBackendAddressPools.Id) {
             return $false
-        }
-        else {
-            return $true
+        }        
+    }
+
+    # 2nd Outbound Rule の ELB 配下ではない
+    foreach ($ipconfig in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations) {
+        foreach ($LoadBalancerBackendAddressPool in $ipconfig.LoadBalancerBackendAddressPools) {
+            $tmp = [regex]::Matches($LoadBalancerBackendAddressPool.id, "(.*)\/backendAddressPools\/")
+            $lbId = $tmp.Groups[1].Value
+
+            if ($null -ne ($elbList | Where-Object { $_.Id -eq $lbId })) {
+                return $true
+            }
         }
     }
+    return $false
+}
+
+function Confirm-ElbBackendForVmss {
+    param (
+        $nicConfig,
+        $elbList 
+    )
+    
+    # 1st check ILB と ELB のどちらでもない
+    foreach ($ipconfig in $nicConfig.IpConfigurations) {
+        if ( $null -eq $ipconfig.LoadBalancerBackendAddressPools.Id) {
+            return $false
+        }        
+    }
+
+    # 2nd Outbound Rule の ELB 配下ではない
+    foreach ($ipconfig in $nicConfig.IpConfigurations) {
+        foreach ($LoadBalancerBackendAddressPool in $ipconfig.LoadBalancerBackendAddressPools) {
+            $tmp = [regex]::Matches($LoadBalancerBackendAddressPool.id, "(.*)\/backendAddressPools\/")
+            $lbId = $tmp.Groups[1].Value
+
+            if ($null -ne ($elbList | Where-Object { $_.Id -eq $lbId })) {
+                return $true
+            }
+        }
+    }
+    return $false
 }
 
 # NIC のサブネットに 0.0.0.0/0 -> VirtualAppliance な UDR があるか確認
@@ -96,6 +137,25 @@ function Confirm-useNVA {
     )
 
     foreach ($ipconfig in ($nicList | Where-Object { $_.Id -eq $nicId }).IpConfigurations) {
+        $routeTableId = ($vnetList.Subnets | Where-Object { $_.id -eq $ipconfig.Subnet.Id }).RouteTable.Id
+        foreach ($route in ($routeTableList | Where-Object { $_.id -eq $routeTableId }).Routes) {
+            if ( $route.AddressPrefix -eq "0.0.0.0/0" -and $route.NextHopType -eq "VirtualAppliance") {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+# NIC のサブネットに 0.0.0.0/0 -> VirtualAppliance な UDR があるか確認
+function Confirm-useNVAForVmss {
+    param (
+        $nicConfig,
+        $vnetList,
+        $routeTableList
+    )
+
+    foreach ($ipconfig in $nicConfig.IpConfigurations) {
         $routeTableId = ($vnetList.Subnets | Where-Object { $_.id -eq $ipconfig.Subnet.Id }).RouteTable.Id
         foreach ($route in ($routeTableList | Where-Object { $_.id -eq $routeTableId }).Routes) {
             if ( $route.AddressPrefix -eq "0.0.0.0/0" -and $route.NextHopType -eq "VirtualAppliance") {
@@ -120,4 +180,22 @@ foreach ($vm in $vmList) {
     }
 }
 
+
+Write-Output "The following Vms uses a default outbound access"
 $vmWithDefaultSnat
+
+foreach ($vmss in $vmssList) {
+    foreach ($nicConfig in $vmss.VirtualMachineProfile.NetworkProfile.NetworkInterfaceConfigurations) {
+        if ( (Confirm-UseNatGwForVmss $nicConfig $vnetList) -eq $false) {
+            if ( (Confirm-ElbBackendForVmss $nicConfig $elbList) -eq $false) {         
+                if ( (Confirm-useNVAForVmss $nicConfig $vnetList $routeTableList) -eq $false) {                
+                    $vmssWithDefaultSnat.Add($vmss) > $null                                
+                }
+            }
+        }            
+    }
+}
+
+Write-Output "The following Vms uses a default outbound access"
+$vmssWithDefaultSnat | Select-Object ResourceGroupName, Name, Location, `
+    @{Label="Sku"; Expression={$_.sku.Name}}, @{Label="Capacity"; Expression={$_.sku.Capacity}}  | ft *
