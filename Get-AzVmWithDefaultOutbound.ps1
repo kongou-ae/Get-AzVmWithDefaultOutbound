@@ -168,15 +168,24 @@ function Confirm-useNVAForVmss {
 
 foreach ($vm in $vmList) {
     foreach ($nic in $vm.NetworkProfile.NetworkInterfaces) {
-        if ( (Confirm-HasPip $nic.Id $nicList) -eq $false) {
-            if ( (Confirm-UseNatGw $nic.Id $nicList $vnetList) -eq $false) {
-                if ( (Confirm-ElbBackend $nic.Id $nicList $elbList) -eq $false) {            
-                    if ( (Confirm-useNVA $nic.Id $nicList $vnetList $routeTableList) -eq $false) {                
-                        $vmWithDefaultSnat.Add($vm) > $null            
-                    }
-                }
-            }            
+        if ( (Confirm-useNVA $nic.Id $nicList $vnetList $routeTableList) -eq $true) {
+            continue
+        }  
+
+        if ( (Confirm-UseNatGw $nic.Id $nicList $vnetList) -eq $true) {
+            continue
         }
+
+        if ( (Confirm-HasPip $nic.Id $nicList) -eq $true) {
+            continue
+        }
+
+        if ( (Confirm-ElbBackend $nic.Id $nicList $elbList) -eq $true) {
+            continue
+        }            
+        
+        $vmWithDefaultSnat.Add($vm) > $null            
+        
     }
 }
 
@@ -186,16 +195,20 @@ $vmWithDefaultSnat
 
 foreach ($vmss in $vmssList) {
     foreach ($nicConfig in $vmss.VirtualMachineProfile.NetworkProfile.NetworkInterfaceConfigurations) {
-        if ( (Confirm-UseNatGwForVmss $nicConfig $vnetList) -eq $false) {
-            if ( (Confirm-ElbBackendForVmss $nicConfig $elbList) -eq $false) {         
-                if ( (Confirm-useNVAForVmss $nicConfig $vnetList $routeTableList) -eq $false) {                
-                    $vmssWithDefaultSnat.Add($vmss) > $null                                
-                }
-            }
-        }            
+        if ( (Confirm-UseNatGwForVmss $nicConfig $vnetList) -eq $true) {
+            continue
+        }
+        if ( (Confirm-ElbBackendForVmss $nicConfig $elbList) -eq $true) {
+            continue
+        }         
+        if ( (Confirm-useNVAForVmss $nicConfig $vnetList $routeTableList) -eq $true) {
+            continue
+        }                
+        $vmssWithDefaultSnat.Add($vmss) > $null                                
+                          
     }
 }
 
 Write-Output "The following Vms uses a default outbound access"
 $vmssWithDefaultSnat | Select-Object ResourceGroupName, Name, Location, `
-    @{Label="Sku"; Expression={$_.sku.Name}}, @{Label="Capacity"; Expression={$_.sku.Capacity}}  | ft *
+@{Label = "Sku"; Expression = { $_.sku.Name } }, @{Label = "Capacity"; Expression = { $_.sku.Capacity } }  | ft *
