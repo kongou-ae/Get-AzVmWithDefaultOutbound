@@ -1,12 +1,12 @@
 /*
 - defaultOutVM01 shoud be detected because this VM uses default outbound.
 - noIntUdrVM01 should be detected because this VM runs on the subnet which doesn't have 0.0.0.0/0 route.
-- defaultSnatElbVM01 should be detected because this VM is the backend of the ELB which doesn't use outbound rule.
 
+- defaultSnatElbVM01 should not be detected because this VM is the backend of the ELB which doesn't use outbound rule.
 - pipVM01 should not be detected because this pip attaches to this VM.
 - intUdrVM01 should not be detected because this VM runs on the subnet which udr(0.0.0.0/0 -> VirtualAppliance) related with.
 - outboundElbVM01 should not be detected because this VM is the backend of the ELB which uses outbound rule.
-- natGwVM91 shoud no be detected because this VM runs on the subnet which NAT Gw relates with.
+- natGwVM01 shoud no be detected because this VM runs on the subnet which NAT Gw relates with.
 */
 
 param location string = 'japaneast'
@@ -771,8 +771,8 @@ resource natGw 'Microsoft.Network/natGateways@2023-05-01' = {
 /*
 - defaultOutVMSS01 shoud be detected because this VM uses default outbound.
 - noIntUdrVMSS01 should be detected because this VM runs on the subnet which doesn't have 0.0.0.0/0 route.
-- defaultSnatElbVMSS01 should be detected because this VM is the backend of the ELB which doesn't use outbound rule.
 
+- defaultSnatElbVMSS01 should not be detected because this VM is the backend of the ELB which doesn't use outbound rule.
 - intUdrVMSS01 should not be detected because this VM runs on the subnet which udr(0.0.0.0/0 -> VirtualAppliance) related with.
 - outboundElbVMSS01 should not be detected because this VM is the backend of the ELB which uses outbound rule.
 - natGwVMSS01 shoud no be detected because this VM runs on the subnet which NAT Gw relates with.
